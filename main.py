@@ -37,26 +37,26 @@ app.add_middleware(
 
 # Input urls either of videos or of images
 class VideoURLs(BaseModel):
-    video_urls: List[str]
+    urls: List[str]
 
 
 # Merge Videos API End-Point
 @app.post("/merge-videos", response_class=FileResponse)
 async def merge_videos(video_payload: VideoURLs):  # Asynchronous Function for merging videos using Urls
-    video_urls = video_payload.video_urls
+    urls = video_payload.urls
 
     # At least 2 urls required one should be body, if not will through error
-    if len(video_urls) < 2:
+    if len(urls) < 2:
         return {"error": "At least 2 videos required (body + overlays)"}
 
     # Auto-detect body video (e.g., contains 'bodyUploadVideo')
-    body_index = next((i for i, url in enumerate(video_urls) if "bodyUploadVideo" in url), None)
+    body_index = next((i for i, url in enumerate(urls) if "bodyUploadVideo" in url), None)
 
     if body_index is None:
         return {"error": "Could not detect body video. Make sure one URL contains 'bodyUploadVideo'"}
 
     # Read all videos
-    readers = [imageio.get_reader(url, format='ffmpeg') for url in video_urls]
+    readers = [imageio.get_reader(url, format='ffmpeg') for url in urls]
     body_reader = readers[body_index]
     fps = body_reader.get_meta_data()['fps']
     frames = []
