@@ -42,7 +42,7 @@ llvmlite==0.44.0
 loguru==0.7.3
 MarkupSafe==3.0.2
 matplotlib==3.9.0
-mediapipe==0.10.11
+mediapipe
 ml_dtypes==0.5.1
 more-itertools==10.7.0
 moviepy==1.0.3
