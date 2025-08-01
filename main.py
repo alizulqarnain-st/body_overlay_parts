@@ -1,18 +1,16 @@
 # ===== Libraries =====
 import uuid
 import imageio
-import requests
 import numpy as np
-from PIL import Image
-from io import BytesIO
 from typing import List
 import os
 import tempfile
 import cv2
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
-from rembg import remove
+from rembg import remove, new_session
 from pydantic import BaseModel
 from moviepy.editor import ImageSequenceClip
 
@@ -74,7 +72,7 @@ async def merge_videos(video_payload: VideoURLs):
     temp_dir = tempfile.gettempdir()
     merged_path = os.path.join(temp_dir, f"merged_{uuid.uuid4().hex}.mp4")
     clip = ImageSequenceClip(frames, fps=fps)
-    clip.write_videofile(merged_path, codec='libx264', audio=False, verbose=False, logger=None)
+    clip.write_videofile(merged_path, codec='libx264', audio=False, verbose=False, logger=None, preset='ultrafast')
 
     # ===== Background Removal using rembg =====
     frame_temp_dir = os.path.join(temp_dir, "frames_" + uuid.uuid4().hex)
@@ -93,33 +91,57 @@ async def merge_videos(video_payload: VideoURLs):
         cv2.imwrite(frame_path, frame)
     cap.release()
 
-    # Remove background using rembg with alpha
-    frame_files = sorted(os.listdir(frame_temp_dir))
-    for frame_file in frame_files:
+    # Load rembg session once
+    session = new_session()
+
+    def remove_bg_for_frame(frame_file):
         input_path = os.path.join(frame_temp_dir, frame_file)
         output_path = os.path.join(output_frame_dir, frame_file)
+        with open(input_path, "rb") as inp_file:
+            input_bytes = inp_file.read()
+            output_bytes = remove(
+                input_bytes,
+                session=session,
+                alpha_matting=True,
+                alpha_matting_foreground_threshold=240
+            )
+            with open(output_path, "wb") as out_file:
+                out_file.write(output_bytes)
 
-        with Image.open(input_path) as img:
-            output_img = remove(img, alpha_matting=True, alpha_matting_foreground_threshold=240)
-            output_img.save(output_path)
+    frame_files = sorted(os.listdir(frame_temp_dir))
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        executor.map(remove_bg_for_frame, frame_files)
 
-    # Encode video to webm with alpha channel
+    # ===== Ensure Sequential Naming for FFmpeg =====
+    final_frame_dir = os.path.join(temp_dir, f"ffmpeg_ready_{uuid.uuid4().hex}")
+    os.makedirs(final_frame_dir, exist_ok=True)
+
+    for idx, frame_file in enumerate(sorted(os.listdir(output_frame_dir))):
+        src = os.path.join(output_frame_dir, frame_file)
+        dst = os.path.join(final_frame_dir, f"frame_{idx:05d}.png")
+        shutil.copyfile(src, dst)
+
+    # ===== Encode video to webm with alpha channel =====
     output_webm = os.path.join(temp_dir, f"background_removed_{uuid.uuid4().hex}.webm")
     subprocess.run([
         'ffmpeg', '-y',
         '-framerate', str(fps),
-        '-i', os.path.join(output_frame_dir, 'frame_%05d.png'),
+        '-i', os.path.join(final_frame_dir, 'frame_%05d.png'),
         '-c:v', 'libvpx-vp9',
         '-pix_fmt', 'yuva420p',
         '-auto-alt-ref', '0',
+        '-threads', '8',
+        '-preset', 'veryfast',
         output_webm
     ], check=True)
 
-    # Clean up temp frames
+    # Clean up all temp directories
     shutil.rmtree(frame_temp_dir)
     shutil.rmtree(output_frame_dir)
+    shutil.rmtree(final_frame_dir)
 
     return FileResponse(output_webm, media_type="video/webm", filename="background_removed.webm")
+
 
 class ImageURLs(BaseModel):
     image_urls : List[str]
