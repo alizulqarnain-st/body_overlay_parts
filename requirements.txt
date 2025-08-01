@@ -18,7 +18,7 @@ jsonschema
 jsonschema-specifications
 lazy_loader
 llvmlite
-moviepy
+moviepy==1.0.3
 mpmath
 networkx
 numba
